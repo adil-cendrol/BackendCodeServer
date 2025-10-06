@@ -182,8 +182,11 @@ console.log("✅ Browser WebSocket Server running on ws://localhost:8080");
 
 // ----------------------
 // 2️⃣ Meta WebSocket Client
-const META_WS_URL = "wss://464lquf5o3.execute-api.ap-south-1.amazonaws.com/production?auth_token=eyJraWQiOiJIWFpUZWlNRWRSeHl4dWtTbUt1MXNTSm9xd1FRSXl6R1NQd3hWNlZQRHZrPSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiJlYzkzOWQ2MC05ZjUwLTQ5MmEtODBiZC01MDY1MzNhMzVhYjIiLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAuYXAtc291dGgtMS5hbWF6b25hd3MuY29tXC9hcC1zb3V0aC0xX1JBa256a3FXRCIsImNsaWVudF9pZCI6IjdiNjI2NTByMWJra2g0N2dwajgzcWdwNWQ0Iiwib3JpZ2luX2p0aSI6ImFmMDhkZDQwLWQyNGItNGIxYi1hODQ1LWU0NGFhZGU5ZjY4NSIsImV2ZW50X2lkIjoiNTQzZDhhNmItYmUwMy00MmNiLWJlYzktZTc1M2FlNTY1YmViIiwidG9rZW5fdXNlIjoiYWNjZXNzIiwic2NvcGUiOiJhd3MuY29nbml0by5zaWduaW4udXNlci5hZG1pbiIsImF1dGhfdGltZSI6MTc1OTU2ODc3MiwiZXhwIjoxNzU5NjU1MTcyLCJpYXQiOjE3NTk1Njg3NzIsImp0aSI6ImE5NzQwNWRjLWVhNzYtNDMxZi1iMmQxLTcyNTlmYmQ5ZmEyMCIsInVzZXJuYW1lIjoiZWM5MzlkNjAtOWY1MC00OTJhLTgwYmQtNTA2NTMzYTM1YWIyIn0.pn5qco6xTDz-T4Zf0VWY7kvxZXoE--2cLAhgtbDFiXOUWl4QZgf6AyI9IohkO0copK41-u5uEuAvcgEalI3s5-gu8Vb17w-B2Ee1NJ2am5xueZLC6SB047bw2WEq6hAwb8whEoi74mfE6wrRtv-9s0II4xQtpgJvpUGcuzxcEIb0263g_i1WwpEALb-DdEtv9OeSFDvxfmzpCdWMd-5wMObgZKk07vQa2NeIIQiMJK2Qz5HA0QYfRxEwOgUr3tcl5xATPDL9-fRWOb9LyWUFNyiyduRS1VEFEhi7fjZe0_tdRvuxZT_OJkBrTh9-_a26BVA2LBH9WHhtegt5LCpKxw";
+const META_WS_URL =process.env.META_WS_URL
 const metaWs = new WebSocket(META_WS_URL);
+metaWs.on("open", () => {
+  console.log("✅ Connected to Meta WebSocket");
+});
 
 // ----------------------
 // 3️⃣ Create Mixer and Output
