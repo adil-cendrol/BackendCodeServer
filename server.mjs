@@ -13,7 +13,19 @@ dotenv.config();
 
 // ----------------------
 // 1️⃣ Browser WebSocket Server
-const wss = new WebSocketServer({ port: 8080 });
+import http from "http";
+import { WebSocketServer } from "ws";
+
+// Render provides a PORT automatically
+const PORT = process.env.PORT || 8080;
+
+// Create an HTTP server (Render requires one)
+const server = http.createServer();
+
+// Attach WebSocket server to HTTP server
+const wss = new WebSocketServer({ server });
+
+
 console.log("✅ Browser WebSocket Server running on ws://localhost:8080");
 const outputFile = fs.createWriteStream("call_record.wav");
 
@@ -143,5 +155,10 @@ wss.on("connection", async (ws) => {
     pcMeta.close();
     console.log("❌ Browser disconnected, closing PeerConnections");
   });
+});
+
+// Start listening
+server.listen(PORT, () => {
+  console.log(`✅ WebSocket server running on port ${PORT}`);
 });
 
