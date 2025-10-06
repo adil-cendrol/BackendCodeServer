@@ -174,6 +174,8 @@ import Prism from "prism-media";
 import { Writer as WavWriter } from "wav";
 import fs from "fs";
 import AudioMixer from "audio-mixer";
+import dotenv from "dotenv";
+dotenv.config();
 
 // ----------------------
 // 1️⃣ WebSocket Server
@@ -182,7 +184,8 @@ console.log("✅ Browser WebSocket Server running on ws://localhost:8080");
 
 // ----------------------
 // 2️⃣ Meta WebSocket Client
-const META_WS_URL =process.env.META_WS_URL
+const META_WS_URL = process.env.META_WS_URL
+console.log( process.env.META_WS_URL)
 const metaWs = new WebSocket(META_WS_URL);
 metaWs.on("open", () => {
   console.log("✅ Connected to Meta WebSocket");
