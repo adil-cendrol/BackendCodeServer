@@ -304,7 +304,7 @@ wss.on("connection", (ws) => {
         });
 
         await pcClient.setRemoteDescription({ type: "offer", sdp: data.sdp });
-        pcClient.addTransceiver("audio", { direction: "recvonly" });
+        pcClient.addTransceiver("audio", { direction: "sendrecv" });
 
         // Send answer to Browser
         const clientAnswer = await pcClient.createAnswer();
@@ -313,7 +313,7 @@ wss.on("connection", (ws) => {
         ws.send(JSON.stringify(pcClient.localDescription));
 
         // Create Meta offer
-        pcMeta.addTransceiver("audio", { direction: "recvonly" });
+        pcMeta.addTransceiver("audio", { direction: "sendrecv" });
         const metaOffer = await pcMeta.createOffer();
         await pcMeta.setLocalDescription(metaOffer);
         await waitForIceGathering(pcMeta);
