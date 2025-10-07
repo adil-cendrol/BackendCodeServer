@@ -170,10 +170,12 @@
 // server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
 
-const http = require("http");
-const { WebSocketServer } = require("ws");
-const { RTCPeerConnection } = require("werift");
-require("dotenv").config();
+
+import http from "http";
+import { WebSocketServer } from "ws";
+import { RTCPeerConnection } from "werift";
+import dotenv from "dotenv";
+dotenv.config();
 
 const server = http.createServer();
 const wss = new WebSocketServer({ noServer: true });
