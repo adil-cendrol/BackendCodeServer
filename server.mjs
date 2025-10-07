@@ -232,6 +232,7 @@ wss.on("connection", (ws) => {
   // 🎙️ Browser → Meta audio
   pcClient.onTrack.subscribe((track) => {
     if (track.kind === "audio") {
+      console.log("meta browser meta")
       pcMeta.addTrack(track);
 
       const opusStream = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
@@ -245,7 +246,10 @@ wss.on("connection", (ws) => {
 
   // 🎧 Meta → Browser audio
   pcMeta.onTrack.subscribe((track) => {
-    if (track.kind === "audio") pcClient.addTrack(track);
+    if (track.kind === "audio") {
+      console.log("meta side remote packet")
+      pcClient.addTrack(track)
+    };
   });
 
   // 📨 Browser sends SDP offer
