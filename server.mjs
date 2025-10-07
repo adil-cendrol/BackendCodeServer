@@ -126,7 +126,6 @@
 //     console.log("❌ Browser disconnected, closing PeerConnections");
 //   });
 // });
-
 import http from "http";
 import { WebSocketServer } from "ws";
 import { RTCPeerConnection } from "werift";
@@ -143,19 +142,21 @@ const metaWss = new WebSocketServer({ noServer: true });
 
 // 🔗 Active connections
 let activeMetaSocket = null;
-let activePcMeta= null;
+let activePcMeta = null;
 let activeBrowserWs = null;
 
-// Helper: wait for ICE gathering
+// 🧩 Helper to gather ICE candidates
 async function gatherIce(pc) {
   return new Promise((resolve) => {
+    const candidates = [];
     pc.onIceCandidate.subscribe((candidate) => {
-      if (!candidate) resolve(); // null candidate signals gathering finished
+      if (candidate) candidates.push(candidate);
+      if (!candidate) resolve(candidates); // null candidate = finished
     });
   });
 }
 
-// ✅ Meta WebSocket
+// ========================= META WS =========================
 metaWss.on("connection", (ws, req) => {
   console.log("🔗 Meta WebSocket connected from", req.socket.remoteAddress);
   activeMetaSocket = ws;
@@ -167,7 +168,7 @@ metaWss.on("connection", (ws, req) => {
     if (data.type === "answer") {
       await activePcMeta?.setRemoteDescription({ type: "answer", sdp: data.sdp });
     } else if (data.type === "offer") {
-      // Meta initiated a call → relay to Browser
+      // Meta initiated call → relay to Browser
       const pcClient = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
@@ -201,16 +202,16 @@ metaWss.on("connection", (ws, req) => {
   });
 });
 
-// ✅ Browser WebSocket
+// ========================= BROWSER WS =========================
 wss.on("connection", (ws) => {
-  console.log("📡 New browser connected");
+  console.log("📡 Browser connected");
   activeBrowserWs = ws;
 
   const pcClient = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
   const pcMeta = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
   activePcMeta = pcMeta;
 
-  // Browser → Meta audio
+  // 🎙 Browser → Meta audio
   pcClient.onTrack.subscribe((track) => {
     if (track.kind === "audio") {
       pcMeta.addTrack(track);
@@ -223,25 +224,27 @@ wss.on("connection", (ws) => {
     }
   });
 
-  // Meta → Browser audio
+  // 🎧 Meta → Browser audio
   pcMeta.onTrack.subscribe((track) => {
     if (track.kind === "audio") pcClient.addTrack(track);
   });
 
-  // Handle Browser SDP offer
+  // Browser sends SDP offer
   ws.on("message", async (message) => {
     const { type, sdp } = JSON.parse(message);
 
     if (type === "offer") {
+      // Browser → Node
       await pcClient.setRemoteDescription({ type, sdp });
       pcClient.addTransceiver("audio", { direction: "recvonly" });
 
       const clientAnswer = await pcClient.createAnswer();
       await pcClient.setLocalDescription(clientAnswer);
       await gatherIce(pcClient);
+
       ws.send(JSON.stringify(pcClient.localDescription));
 
-      // Create Meta offer with ICE candidates
+      // Node → Meta
       pcMeta.addTransceiver("audio", { direction: "recvonly" });
       const metaOffer = await pcMeta.createOffer();
       await pcMeta.setLocalDescription(metaOffer);
@@ -257,7 +260,7 @@ wss.on("connection", (ws) => {
         callEvent: "connect",
       };
 
-      console.log("📤 Sending offer to Meta WebSocket server:", metaPayload);
+      console.log("📤 Sending offer to Meta:", metaPayload);
       activeMetaSocket?.send(JSON.stringify(metaPayload));
     }
   });
@@ -269,7 +272,7 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Upgrade handling
+// ========================= SERVER UPGRADE =========================
 server.on("upgrade", (req, socket, head) => {
   if (req.url === "/meta") {
     metaWss.handleUpgrade(req, socket, head, (ws) => metaWss.emit("connection", ws, req));
