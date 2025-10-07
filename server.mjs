@@ -170,24 +170,21 @@
 // server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
 
-
 import http from "http";
 import { WebSocketServer } from "ws";
 import { RTCPeerConnection } from "werift";
-import dotenv from "dotenv";
-dotenv.config();
 
+// ----------------- SERVER -----------------
 const server = http.createServer();
-const wss = new WebSocketServer({ noServer: true });
-const metaWss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true });   // Browser
+const metaWss = new WebSocketServer({ noServer: true }); // Meta
 
-let activeMetaSocket = null;
 let activeBrowserWs = null;
+let activeMetaWs = null;
+let activeBrowserPC = null;
+let activeMetaPC = null;
 
-let browserPC = null;
-let metaPC = null;
-
-// ---------------- Helper ----------------
+// ----------------- HELPER: Finalize SDP -----------------
 function finalizeSDP(pc, candidates) {
   let sdp = pc.localDescription.sdp;
   const srflx = candidates.find(c => c.candidate.includes("typ srflx"));
@@ -202,9 +199,11 @@ function finalizeSDP(pc, candidates) {
   return sdp;
 }
 
-// ---------------- Create Audio PC ----------------
-async function createAudioPC(direction = "sendrecv") {
-  const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+// ----------------- HELPER: Create PC -----------------
+async function createPC(direction = "sendrecv") {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  });
   pc.addTransceiver("audio", { direction });
 
   const candidates = [];
@@ -212,89 +211,211 @@ async function createAudioPC(direction = "sendrecv") {
     if (event.candidate) candidates.push(event.candidate);
   };
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  await new Promise(resolve => setTimeout(resolve, 500));
-  const sdp = finalizeSDP(pc, candidates);
-  return { pc, sdp };
+  return { pc, candidates };
 }
 
-// ---------------- META WEBSOCKET ----------------
-metaWss.on("connection", async (ws, req) => {
-  console.log("🔗 Meta WebSocket connected from", req.socket.remoteAddress);
-  activeMetaSocket = ws;
+// ----------------- META WS -----------------
+// metaWss.on("connection", async (ws) => {
+//   console.log("🔗 Meta connected");
+//   activeMetaWs = ws;
 
-  ws.on("message", async (message) => {
-    const data = JSON.parse(message.toString());
-    console.log("📩 From Meta:", data);
+//   const { pc, candidates } = await createPC("sendrecv");
+//   activeMetaPC = pc;
 
-    if (data.type === "offer") {
-      if (!metaPC) {
-        const result = await createAudioPC("sendrecv");
-        metaPC = result.pc;
-        const answerSDP = result.sdp;
+//   // // Forward audio tracks from Meta → Browser
+//   // pc.onTrack.subscribe(track => {
+//   //   if (track.kind === "audio" && activeBrowserPC) {
+//   //     console.log("🎧 Meta audio track received, forwarding to Browser");
+//   //     activeBrowserPC.addTrack(track);
+//   //   }
+//   // });
+//   pc.onTrack.subscribe(track => {
+//     if (track.kind === "audio" && activeBrowserPC) {
+//       console.log("🎧 Meta audio track received, forwarding to Browser");
+//       activeBrowserPC.addTrack(track);
+//     }
+//   });
 
-        await metaPC.setRemoteDescription({ type: "offer", sdp: data.sdp });
-        ws.send(JSON.stringify({ type: "answer", sdp: answerSDP }));
 
-        metaPC.onTrack.subscribe(track => {
-          if (track.kind === "audio" && browserPC) {
-            console.log("🎧 Track received from Meta:", track.id);
-            browserPC.addTrack(track);
-          }
-        });
-      }
+//   ws.on("message", async (msg) => {
+//     const data = JSON.parse(msg.toString());
+//     console.log(data, "data is there")
+
+//     if (data.type === "offer") {
+//       // Meta is sending an offer → set remote + answer
+//       await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
+//       const answer = await pc.createAnswer();
+//       await pc.setLocalDescription(answer);
+
+//       const finalSDP = finalizeSDP(pc, candidates);
+//       ws.send(JSON.stringify({ type: "answer", sdp: finalSDP }));
+//     }
+//     else if (data.sdpType === "answer") {
+//       // Meta is sending an answer → set it on your existing PC
+//       if (activeMetaPC) {
+//         console.log("✅ Setting remote answer from Meta");
+//         await activeMetaPC.setRemoteDescription({ type: "answer", sdp: data.sdp });
+//       }
+//     }
+//   });
+
+//   ws.on("close", () => {
+//     console.log("❌ Meta disconnected");
+//     activeMetaWs = null;
+//     activeMetaPC = null;
+//   });
+// });
+
+// ----------------- META WS -----------------
+metaWss.on("connection", async (ws) => {
+  console.log("🔗 Meta connected");
+  activeMetaWs = ws;
+
+  const { pc, candidates } = await createPC("sendrecv");
+  activeMetaPC = pc;
+
+  // Forward audio tracks from Meta → Browser
+  pc.onTrack.subscribe(track => {
+    if (track.kind === "audio" && activeBrowserPC) {
+      console.log("🎧 Meta audio track received, forwarding to Browser");
+      activeBrowserPC.addTrack(track);
     }
   });
 
-  ws.on("close", () => {
-    console.log("❌ Meta disconnected");
-    activeMetaSocket = null;
-    metaPC = null;
+  ws.on("message", async (msg) => {
+    const data = JSON.parse(msg.toString());
+
+    if (data.type === "offer") {
+      // Meta sends an offer → answer
+      await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      const finalSDP = finalizeSDP(pc, candidates);
+      ws.send(JSON.stringify({ type: "answer", sdp: finalSDP }));
+    }
+    else if (data.sdpType === "answer") {
+      // Browser previously sent offer → set remote
+      console.log(activeMetaPC, data, "data inside that")
+      if (activeMetaPC) {
+          console.log(data, "data inside22e that")
+        await activeMetaPC.setRemoteDescription({ type: "answer", sdp: data.sdp });
+      }
+    }
+    else if (data.type === "candidate") {
+      await pc.addIceCandidate(data.candidate);
+    }
   });
 });
 
-// ---------------- BROWSER WEBSOCKET ----------------
+
+
+
+// ----------------- BROWSER WS -----------------
+// wss.on("connection", async (ws) => {
+//   console.log("📡 Browser connected");
+//   activeBrowserWs = ws;
+
+//   const { pc, candidates } = await createPC("sendrecv");
+//   activeBrowserPC = pc;
+
+//   // Forward audio tracks from Browser → Meta
+//   pc.onTrack.subscribe(track => {
+//     if (track.kind === "audio" && activeMetaPC) {
+//       console.log("🎤 Browser audio track received, forwarding to Meta");
+//       activeMetaPC.addTrack(track);
+//     }
+//   });
+
+//   ws.on("message", async (msg) => {
+//     const data = JSON.parse(msg.toString());
+//     if (data.type === "offer") {
+//       await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
+//       const answer = await pc.createAnswer();
+//       await pc.setLocalDescription(answer);
+
+//       const finalSDP = finalizeSDP(pc, candidates);
+//       ws.send(JSON.stringify({ type: "answer", sdp: finalSDP }));
+
+//       // Optional: Relay offer to Meta if already connected
+//       if (activeMetaWs) {
+//         const { pc: metaRelayPC, candidates: metaCandidates } = await createPC();
+//         activeMetaPC = metaRelayPC;
+//         const metaOffer = await metaRelayPC.createOffer();
+//         await metaRelayPC.setLocalDescription(metaOffer);
+//         const metaSDP = finalizeSDP(metaRelayPC, metaCandidates);
+//         console.log(metaSDP, "meta sdp")
+//         activeMetaWs.send(JSON.stringify({ type: "offer", sdp: metaSDP }));
+//       }
+//     }
+//   });
+
+//   ws.on("close", () => {
+//     console.log("❌ Browser disconnected");
+//     activeBrowserWs = null;
+//     activeBrowserPC = null;
+//   });
+// });
+// ----------------- BROWSER WS -----------------
+
 wss.on("connection", async (ws) => {
   console.log("📡 Browser connected");
   activeBrowserWs = ws;
-  // addjd
 
-  if (!browserPC) {
-    const result = await createAudioPC("sendrecv");
-    browserPC = result.pc;
+  const { pc, candidates } = await createPC("sendrecv");
+  activeBrowserPC = pc;
 
-    browserPC.onTrack.subscribe(track => {
-      if (track.kind === "audio" && metaPC) {
-        console.log("🎤 Track received from Browser:", track.id);
-        metaPC.addTrack(track);
-      }
-    });
-  }
+  // Forward audio tracks from Browser → Meta
+  pc.onTrack.subscribe((track) => {
+    if (track.kind === "audio" && activeMetaPC) {
+      console.log("🎤 Browser track received, forwarding to Meta");
+      activeMetaPC.addTrack(track);
 
-  ws.on("message", async (message) => {
-    const { type, sdp } = JSON.parse(message.toString());
-    if (type === "offer") {
-      await browserPC.setRemoteDescription({ type: "offer", sdp });
+      // // Optional: save audio
+      // const opusStream = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
+      // const wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
+      // const output = fs.createWriteStream("browser_audio.wav");
+      // opusStream.pipe(wavWriter).pipe(output);
 
-      if (activeMetaSocket && !metaPC) {
-        const result = await createAudioPC("sendrecv");
-        metaPC = result.pc;
-        const metaOfferSDP = result.sdp;
-        activeMetaSocket.send(JSON.stringify({ type: "offer", sdp: metaOfferSDP }));
+      // track.onReceiveRtp.subscribe((rtp) => {
+      //   console.log("📥 RTP from Browser:", rtp.header.timestamp);
+      //   opusStream.write(rtp.payload);
+      // });
+    }
+  })
+
+  ws.on("message", async (msg) => {
+    const data = JSON.parse(msg.toString());
+
+    if (data.type === "offer") {
+      await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      const finalSDP = finalizeSDP(pc, candidates);
+      ws.send(JSON.stringify({ type: "answer", sdp: finalSDP }));
+
+      // Relay to Meta using the existing PC
+      if (activeMetaWs && activeMetaPC) {
+        const offer = await activeMetaPC.createOffer();
+        await activeMetaPC.setLocalDescription(offer);
+        const metaSDP = finalizeSDP(activeMetaPC, []); // candidates already gathered
+        activeMetaWs.send(JSON.stringify({ type: "offer", sdp: metaSDP }));
       }
     }
-  });
-
-  ws.on("close", () => {
-    console.log("❌ Browser disconnected");
-    activeBrowserWs = null;
-    browserPC = null;
+    else if (data.type === "answer") {
+      if (activeBrowserPC) {
+        await activeBrowserPC.setRemoteDescription({ type: "answer", sdp: data.sdp });
+      }
+    }
+    else if (data.type === "candidate") {
+      await pc.addIceCandidate(data.candidate);
+    }
   });
 });
 
-// ---------------- HTTP Upgrade ----------------
+
+// ----------------- HTTP Upgrade -----------------
 server.on("upgrade", (req, socket, head) => {
   if (req.url === "/meta") {
     metaWss.handleUpgrade(req, socket, head, (ws) => metaWss.emit("connection", ws, req));
@@ -304,4 +425,4 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
