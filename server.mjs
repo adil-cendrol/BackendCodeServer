@@ -259,6 +259,7 @@ metaWss.on("connection", async (ws, req) => {
 wss.on("connection", async (ws) => {
   console.log("📡 Browser connected");
   activeBrowserWs = ws;
+  // addjd
 
   if (!browserPC) {
     const result = await createAudioPC("sendrecv");
