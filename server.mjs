@@ -345,18 +345,45 @@ let activePcMeta = null;
 let activeBrowserWs = null;
 
 // ✅ Helper: wait for ICE gathering and return all candidates
-async function gatherIce(pc) {
+// async function gatherIce(pc) {
+//   return new Promise((resolve) => {
+//     const candidates = [];
+//     pc.onIceCandidate.subscribe((candidate) => {
+//       if (candidate) {
+//         candidates.push(candidate.toJSON().candidate);
+//       } else {
+//         resolve(candidates); // gathering finished
+//       }
+//     });
+//   });
+// }
+async function gatherIce(pc, timeoutMs = 2000) {
   return new Promise((resolve) => {
     const candidates = [];
+
+    // Collect candidates as they arrive
     pc.onIceCandidate.subscribe((candidate) => {
       if (candidate) {
         candidates.push(candidate.toJSON().candidate);
-      } else {
-        resolve(candidates); // gathering finished
+      }
+    });
+
+    // Don’t wait forever — resolve after a short timeout
+    setTimeout(() => {
+      console.log(`⏱️ ICE gathering timeout reached (${timeoutMs}ms)`);
+      resolve(candidates);
+    }, timeoutMs);
+
+    // Also resolve naturally if ICE ends
+    pc.onIceGatheringStateChange.subscribe(() => {
+      if (pc.iceGatheringState === "complete") {
+        console.log("✅ ICE gathering completed early");
+        resolve(candidates);
       }
     });
   });
 }
+
 
 // ✅ Helper: replace 0.0.0.0 in SDP with public IP (from srflx)
 function finalizeSDP(sdp, candidates) {
