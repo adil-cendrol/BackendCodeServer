@@ -139,22 +139,25 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // 🧩 Browser WebSocket server
-const BROWSER_PORT = process.env.BROWSER_PORT || 8080;
-const browserServer = http.createServer();
-const wss = new WebSocketServer({ server: browserServer });
+// const BROWSER_PORT = process.env.BROWSER_PORT || 8080;
+// const browserServer = http.createServer();
+// const wss = new WebSocketServer({ server: browserServer });
 
-browserServer.listen(BROWSER_PORT, () => {
-  console.log(`✅ Browser WebSocket server running on port ${BROWSER_PORT}`);
-});
+// browserServer.listen(BROWSER_PORT, () => {
+//   console.log(`✅ Browser WebSocket server running on port ${BROWSER_PORT}`);
+// });
 
-// 🧩 Meta WebSocket server
-const META_PORT = process.env.META_PORT || 9090;
-const metaServer = http.createServer();
-const metaWss = new WebSocketServer({ server: metaServer });
+// // 🧩 Meta WebSocket server
+// const META_PORT = process.env.META_PORT || 9090;
+// const metaServer = http.createServer();
+// const metaWss = new WebSocketServer({ server: metaServer });
 
-metaServer.listen(META_PORT, () => {
-  console.log(`✅ Meta WebSocket server running on port ${META_PORT}`);
-});
+// metaServer.listen(META_PORT, () => {
+//   console.log(`✅ Meta WebSocket server running on port ${META_PORT}`);
+// });
+const server = http.createServer();
+const wss = new WebSocketServer({ noServer: true });
+const metaWss = new WebSocketServer({ noServer: true });
 
 // 🔗 Active connections
 let activeMetaSocket = null;
@@ -282,4 +285,19 @@ wss.on("connection", (ws) => {
     pcMeta.close();
     console.log("❌ Browser disconnected, PeerConnections closed");
   });
+});
+server.on("upgrade", (req, socket, head) => {
+  if (req.url === "/meta") {
+    metaWss.handleUpgrade(req, socket, head, (ws) => {
+      metaWss.emit("connection", ws, req);
+    });
+  } else {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  }
+});
+
+server.listen(process.env.PORT || 8080, () => {
+  console.log(`✅ Unified WebSocket server running`);
 });
