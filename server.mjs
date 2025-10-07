@@ -146,7 +146,13 @@ let activeBrowserWs = null;
 let pcClient = null;
 let pcMeta = null;
 
-// ========================= Helper: Gather ICE (logging only) =========================
+// ========================= Helper =========================
+// Replace 0.0.0.0 with 127.0.0.1 in SDP
+function fixSdp(sdp) {
+  return sdp.replace(/c=IN IP4 0.0.0.0/g, 'c=IN IP4 127.0.0.1');
+}
+
+// Setup ICE candidates logging & sending
 function setupIce(pc, name, sendCandidateFn) {
   pc.onIceCandidate.subscribe((candidate) => {
     console.log(`🌐 ICE Candidate from ${name}:`, candidate);
@@ -170,24 +176,20 @@ metaWss.on("connection", (ws, req) => {
       } else if (data.type === "offer") {
         console.log("📞 Meta initiated call, creating local PeerConnections");
 
-        // Create PeerConnections
         pcClient = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
         pcMeta = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
 
-        // Setup ICE logging & send
         setupIce(pcClient, "Browser PC", (candidate) => activeBrowserWs?.send(JSON.stringify({ type: "ice", candidate })));
         setupIce(pcMeta, "Meta PC", (candidate) => activeMetaSocket?.send(JSON.stringify({ type: "ice", candidate })));
 
-        // Track Meta → Browser
         pcMeta.onTrack.subscribe((track) => {
           if (track.kind === "audio") pcClient.addTrack(track);
         });
 
-        // Track Browser → Meta
         pcClient.onTrack.subscribe((track) => {
           if (track.kind === "audio") pcMeta.addTrack(track);
 
-          // Optional: save audio to WAV
+          // Optional: save audio
           const opusStream = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
           const wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
           const outputFile = fs.createWriteStream(`call_${Date.now()}.wav`);
@@ -200,13 +202,18 @@ metaWss.on("connection", (ws, req) => {
         pcMeta.addTransceiver("audio", { direction: "recvonly" });
         const metaAnswer = await pcMeta.createAnswer();
         await pcMeta.setLocalDescription(metaAnswer);
-        ws.send(JSON.stringify(pcMeta.localDescription));
+
+        // Fix SDP before sending
+        const fixedMetaAnswer = { ...pcMeta.localDescription, sdp: fixSdp(pcMeta.localDescription.sdp) };
+        ws.send(JSON.stringify(fixedMetaAnswer));
 
         // Create offer for Browser
         pcClient.addTransceiver("audio", { direction: "recvonly" });
         const browserOffer = await pcClient.createOffer();
         await pcClient.setLocalDescription(browserOffer);
-        activeBrowserWs?.send(JSON.stringify(browserOffer));
+
+        const fixedBrowserOffer = { ...pcClient.localDescription, sdp: fixSdp(pcClient.localDescription.sdp) };
+        activeBrowserWs?.send(JSON.stringify(fixedBrowserOffer));
       } else if (data.type === "ice") {
         if (pcMeta) await pcMeta.addIceCandidate(data.candidate);
       }
@@ -232,12 +239,10 @@ wss.on("connection", (ws) => {
     try {
       const data = JSON.parse(message);
 
-      // Browser sends ICE candidate
       if (data.type === "ice" && pcClient) {
         await pcClient.addIceCandidate(data.candidate);
       }
 
-      // Browser sends SDP offer
       if (data.type === "offer") {
         console.log("📥 Received Browser SDP offer");
 
@@ -247,7 +252,6 @@ wss.on("connection", (ws) => {
         setupIce(pcClient, "Browser PC", (candidate) => activeMetaSocket?.send(JSON.stringify({ type: "ice", candidate })));
         setupIce(pcMeta, "Meta PC", (candidate) => activeMetaSocket?.send(JSON.stringify({ type: "ice", candidate })));
 
-        // Tracks
         pcClient.onTrack.subscribe((track) => {
           if (track.kind === "audio") pcMeta.addTrack(track);
 
@@ -267,20 +271,22 @@ wss.on("connection", (ws) => {
 
         const clientAnswer = await pcClient.createAnswer();
         await pcClient.setLocalDescription(clientAnswer);
-        ws.send(JSON.stringify(pcClient.localDescription));
 
-        // Create Meta offer
+        const fixedClientAnswer = { ...pcClient.localDescription, sdp: fixSdp(pcClient.localDescription.sdp) };
+        ws.send(JSON.stringify(fixedClientAnswer));
+
         pcMeta.addTransceiver("audio", { direction: "recvonly" });
         const metaOffer = await pcMeta.createOffer();
         await pcMeta.setLocalDescription(metaOffer);
 
+        const fixedMetaOffer = { ...pcMeta.localDescription, sdp: fixSdp(pcMeta.localDescription.sdp) };
         const metaPayload = {
           AgentChatEventType: "call",
           businessId: 363906680148599,
           FromPhoneId: 385840701287764,
           ToNumber: 919625534956,
-          sdpType: pcMeta.localDescription?.type,
-          sdp: pcMeta.localDescription?.sdp,
+          sdpType: fixedMetaOffer.type,
+          sdp: fixedMetaOffer.sdp,
           callEvent: "connect",
         };
 
