@@ -126,6 +126,8 @@
 //     console.log("❌ Browser disconnected, closing PeerConnections");
 //   });
 // });
+
+
 import http from "http";
 import { WebSocketServer } from "ws";
 import { RTCPeerConnection } from "werift";
@@ -171,14 +173,13 @@ function waitForIceGathering(pc) {
 
 // --- Rewrite SDP to browser style ---
 function makeBrowserSDP(sdp) {
-  let newSdp = sdp
+  return sdp
+    // origin line with local IP instead of 0.0.0.0
+    .replace(/^o=- [^\s]+ 0 IN IP4 0\.0\.0\.0/m, `o=- ${Date.now()} 2 IN IP4 127.0.0.1`)
+    // c= line for media
     .replace(/c=IN IP4 0\.0\.0\.0/g, `c=IN IP4 ${RENDER_IP}`)
-    .replace(/a=rtcp:9 IN IP4 0\.0\.0\.0/g, `a=rtcp:9 IN IP4 ${RENDER_IP}`)
-    .replace(
-      /a=candidate:([^\s]+) 1 udp (\d+) ([0-9.]+) (\d+) typ host/g,
-      `a=candidate:$1 1 udp $2 ${RENDER_IP} $4 typ host`
-    );
-  return newSdp;
+    // host candidates -> public edge IP (optional)
+    .replace(/a=candidate:([^\s]+) 1 udp (\d+) [0-9.]+ (\d+) typ host/g, `a=candidate:$1 1 udp $2 ${RENDER_IP} $3 typ host`)
 }
 
 // --- WebSocket upgrade handler ---
