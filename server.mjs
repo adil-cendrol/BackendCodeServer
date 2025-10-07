@@ -126,6 +126,7 @@
 //     console.log("❌ Browser disconnected, closing PeerConnections");
 //   });
 // });
+
 import http from "http";
 import { WebSocketServer } from "ws";
 import { RTCPeerConnection } from "werift";
@@ -184,7 +185,8 @@ metaWss.on("connection", (ws, req) => {
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
 
-        activePcMeta.onConnectionStateChange.subscribe((state) =>
+        // ✅ Werift uses connectionStateChange, not onConnectionStateChange
+        activePcMeta.connectionStateChange.subscribe((state) =>
           console.log("Meta PC connection state:", state)
         );
 
@@ -232,8 +234,9 @@ wss.on("connection", (ws) => {
   });
   activePcMeta = pcMeta;
 
-  pcClient.onConnectionStateChange.subscribe((state) => console.log("Client PC state:", state));
-  pcMeta.onConnectionStateChange.subscribe((state) => console.log("Meta PC state:", state));
+  // ✅ Correct Werift observable
+  pcClient.connectionStateChange.subscribe((state) => console.log("Client PC state:", state));
+  pcMeta.connectionStateChange.subscribe((state) => console.log("Meta PC state:", state));
 
   // Browser → Meta audio
   pcClient.onTrack.subscribe((track) => {
@@ -244,6 +247,7 @@ wss.on("connection", (ws) => {
       const wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
       const outputFile = fs.createWriteStream(`call_${Date.now()}.wav`);
       opusStream.pipe(wavWriter).pipe(outputFile);
+
       track.onReceiveRtp.subscribe((rtp) => opusStream.write(rtp.payload));
     }
   });
@@ -313,5 +317,5 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 server.listen(process.env.PORT || 8080, () => {
-  console.log(`✅ Unified WebSocket server running`);
+  console.log(`✅ Unified WebSocket server running on port ${process.env.PORT || 8080}`);
 });
