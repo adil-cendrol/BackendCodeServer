@@ -126,7 +126,6 @@
 //     console.log("❌ Browser disconnected, closing PeerConnections");
 //   });
 // });
-
 import http from "http";
 import { WebSocketServer } from "ws";
 import { RTCPeerConnection } from "werift";
@@ -143,21 +142,15 @@ const metaWss = new WebSocketServer({ noServer: true });
 
 // 🔗 Active connections
 let activeMetaSocket = null;
-let activePcMeta = null;
 let activeBrowserWs = null;
+let pcClient = null;
+let pcMeta = null;
 
-// 🧩 Helper: wait for ICE gathering
-async function gatherIce(pc) {
-  return new Promise((resolve) => {
-    const candidates = [];
-    pc.onIceCandidate.subscribe((candidate) => {
-      console.log("🌐 ICE Candidate:", candidate);
-      if (candidate) candidates.push(candidate);
-      if (!candidate) {
-        console.log("✅ ICE gathering finished for PC");
-        resolve(candidates);
-      }
-    });
+// ========================= Helper: Gather ICE (logging only) =========================
+function setupIce(pc, name, sendCandidateFn) {
+  pc.onIceCandidate.subscribe((candidate) => {
+    console.log(`🌐 ICE Candidate from ${name}:`, candidate);
+    if (candidate) sendCandidateFn?.(candidate);
   });
 }
 
@@ -171,41 +164,51 @@ metaWss.on("connection", (ws, req) => {
       const data = JSON.parse(message.toString());
       console.log("📩 From Meta:", data);
 
-      if (data.type === "answer") {
+      if (data.type === "answer" && pcMeta) {
         console.log("📥 Setting remote description from Meta answer");
-        await activePcMeta?.setRemoteDescription({ type: "answer", sdp: data.sdp });
+        await pcMeta.setRemoteDescription({ type: "answer", sdp: data.sdp });
       } else if (data.type === "offer") {
-        console.log("📞 Meta initiated call, relaying to Browser");
+        console.log("📞 Meta initiated call, creating local PeerConnections");
 
-        const pcClient = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        // Create PeerConnections
+        pcClient = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+        pcMeta = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+
+        // Setup ICE logging & send
+        setupIce(pcClient, "Browser PC", (candidate) => activeBrowserWs?.send(JSON.stringify({ type: "ice", candidate })));
+        setupIce(pcMeta, "Meta PC", (candidate) => activeMetaSocket?.send(JSON.stringify({ type: "ice", candidate })));
+
+        // Track Meta → Browser
+        pcMeta.onTrack.subscribe((track) => {
+          if (track.kind === "audio") pcClient.addTrack(track);
         });
 
-        activePcMeta = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        // Track Browser → Meta
+        pcClient.onTrack.subscribe((track) => {
+          if (track.kind === "audio") pcMeta.addTrack(track);
+
+          // Optional: save audio to WAV
+          const opusStream = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
+          const wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
+          const outputFile = fs.createWriteStream(`call_${Date.now()}.wav`);
+          opusStream.pipe(wavWriter).pipe(outputFile);
+          track.onReceiveRtp.subscribe((rtp) => opusStream.write(rtp.payload));
         });
 
-        // ✅ Werift uses connectionStateChange, not onConnectionStateChange
-        activePcMeta.connectionStateChange.subscribe((state) =>
-          console.log("Meta PC connection state:", state)
-        );
+        // Handle Meta offer
+        await pcMeta.setRemoteDescription({ type: "offer", sdp: data.sdp });
+        pcMeta.addTransceiver("audio", { direction: "recvonly" });
+        const metaAnswer = await pcMeta.createAnswer();
+        await pcMeta.setLocalDescription(metaAnswer);
+        ws.send(JSON.stringify(pcMeta.localDescription));
 
-        await activePcMeta.setRemoteDescription({ type: "offer", sdp: data.sdp });
-        activePcMeta.addTransceiver("audio", { direction: "recvonly" });
-
-        const metaAnswer = await activePcMeta.createAnswer();
-        await activePcMeta.setLocalDescription(metaAnswer);
-        await gatherIce(activePcMeta);
-
-        ws.send(JSON.stringify(activePcMeta.localDescription));
-
+        // Create offer for Browser
         pcClient.addTransceiver("audio", { direction: "recvonly" });
         const browserOffer = await pcClient.createOffer();
         await pcClient.setLocalDescription(browserOffer);
-        await gatherIce(pcClient);
-
-        console.log("📤 Sending offer to Browser");
         activeBrowserWs?.send(JSON.stringify(browserOffer));
+      } else if (data.type === "ice") {
+        if (pcMeta) await pcMeta.addIceCandidate(data.candidate);
       }
     } catch (err) {
       console.error("❌ Error processing Meta message:", err);
@@ -215,7 +218,6 @@ metaWss.on("connection", (ws, req) => {
   ws.on("close", () => {
     console.log("❌ Meta WebSocket disconnected");
     activeMetaSocket = null;
-    activePcMeta = null;
   });
 
   ws.on("error", (err) => console.error("❌ Meta WS error:", err));
@@ -226,59 +228,51 @@ wss.on("connection", (ws) => {
   console.log("📡 Browser connected");
   activeBrowserWs = ws;
 
-  const pcClient = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-  });
-  const pcMeta = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-  });
-  activePcMeta = pcMeta;
-
-  // ✅ Correct Werift observable
-  pcClient.connectionStateChange.subscribe((state) => console.log("Client PC state:", state));
-  pcMeta.connectionStateChange.subscribe((state) => console.log("Meta PC state:", state));
-
-  // Browser → Meta audio
-  pcClient.onTrack.subscribe((track) => {
-    if (track.kind === "audio") {
-      pcMeta.addTrack(track);
-
-      const opusStream = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
-      const wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
-      const outputFile = fs.createWriteStream(`call_${Date.now()}.wav`);
-      opusStream.pipe(wavWriter).pipe(outputFile);
-
-      track.onReceiveRtp.subscribe((rtp) => opusStream.write(rtp.payload));
-    }
-  });
-
-  // Meta → Browser audio
-  pcMeta.onTrack.subscribe((track) => {
-    if (track.kind === "audio") pcClient.addTrack(track);
-  });
-
-  // Handle Browser SDP offer
   ws.on("message", async (message) => {
     try {
-      const { type, sdp } = JSON.parse(message);
+      const data = JSON.parse(message);
 
-      if (type === "offer") {
+      // Browser sends ICE candidate
+      if (data.type === "ice" && pcClient) {
+        await pcClient.addIceCandidate(data.candidate);
+      }
+
+      // Browser sends SDP offer
+      if (data.type === "offer") {
         console.log("📥 Received Browser SDP offer");
-        await pcClient.setRemoteDescription({ type, sdp });
+
+        pcClient = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+        pcMeta = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+
+        setupIce(pcClient, "Browser PC", (candidate) => activeMetaSocket?.send(JSON.stringify({ type: "ice", candidate })));
+        setupIce(pcMeta, "Meta PC", (candidate) => activeMetaSocket?.send(JSON.stringify({ type: "ice", candidate })));
+
+        // Tracks
+        pcClient.onTrack.subscribe((track) => {
+          if (track.kind === "audio") pcMeta.addTrack(track);
+
+          const opusStream = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
+          const wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
+          const outputFile = fs.createWriteStream(`call_${Date.now()}.wav`);
+          opusStream.pipe(wavWriter).pipe(outputFile);
+          track.onReceiveRtp.subscribe((rtp) => opusStream.write(rtp.payload));
+        });
+
+        pcMeta.onTrack.subscribe((track) => {
+          if (track.kind === "audio") pcClient.addTrack(track);
+        });
+
+        await pcClient.setRemoteDescription({ type: "offer", sdp: data.sdp });
         pcClient.addTransceiver("audio", { direction: "recvonly" });
 
         const clientAnswer = await pcClient.createAnswer();
         await pcClient.setLocalDescription(clientAnswer);
-        await gatherIce(pcClient);
-
-        console.log("📤 Sending answer back to Browser");
         ws.send(JSON.stringify(pcClient.localDescription));
 
         // Create Meta offer
         pcMeta.addTransceiver("audio", { direction: "recvonly" });
         const metaOffer = await pcMeta.createOffer();
         await pcMeta.setLocalDescription(metaOffer);
-        await gatherIce(pcMeta);
 
         const metaPayload = {
           AgentChatEventType: "call",
@@ -299,8 +293,8 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    pcClient.close();
-    pcMeta.close();
+    pcClient?.close();
+    pcMeta?.close();
     console.log("❌ Browser disconnected, PeerConnections closed");
   });
 
@@ -317,5 +311,5 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 server.listen(process.env.PORT || 8080, () => {
-  console.log(`✅ Unified WebSocket server running on port ${process.env.PORT || 8080}`);
+  console.log(`✅ Unified WebSocket server running`);
 });
