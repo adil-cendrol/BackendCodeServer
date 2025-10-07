@@ -198,10 +198,21 @@ metaWss.on("connection", (ws, req) => {
 
         // Create PeerConnections with STUN
         pcClient = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+
+            { urls: "stun:stun1.l.google.com:19302" },
+
+          ]
         });
         pcMeta = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" },
+
+          { urls: "stun:stun.l.google.com:19302" },
+
+
+
+          ]
         });
 
         setupIce(pcClient, "Browser PC", activeBrowserWs);
@@ -278,10 +289,10 @@ wss.on("connection", (ws) => {
         console.log("📥 Browser SDP offer received");
 
         pcClient = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" } , { urls: "stun:stun.l.google.com:19302" }]
         });
         pcMeta = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" } , { urls: "stun:stun.l.google.com:19302" }]
         });
 
         setupIce(pcClient, "Browser PC", activeMetaWs);
