@@ -125,8 +125,7 @@
 //     pcMeta.close();
 //     console.log("❌ Browser disconnected, closing PeerConnections");
 //   });
-// });
-import http from "http";
+// });import http from "http";
 import { WebSocketServer } from "ws";
 import { RTCPeerConnection } from "werift";
 import Prism from "prism-media";
@@ -145,13 +144,17 @@ let activeMetaSocket = null;
 let activePcMeta = null;
 let activeBrowserWs = null;
 
-// 🧩 Helper to gather ICE candidates
+// 🧩 Helper: wait for ICE gathering
 async function gatherIce(pc) {
   return new Promise((resolve) => {
     const candidates = [];
     pc.onIceCandidate.subscribe((candidate) => {
+      console.log("🌐 ICE Candidate:", candidate);
       if (candidate) candidates.push(candidate);
-      if (!candidate) resolve(candidates); // null candidate = finished
+      if (!candidate) {
+        console.log("✅ ICE gathering finished for PC");
+        resolve(candidates);
+      }
     });
   });
 }
@@ -162,36 +165,47 @@ metaWss.on("connection", (ws, req) => {
   activeMetaSocket = ws;
 
   ws.on("message", async (message) => {
-    const data = JSON.parse(message.toString());
-    console.log("📩 From Meta:", data);
+    try {
+      const data = JSON.parse(message.toString());
+      console.log("📩 From Meta:", data);
 
-    if (data.type === "answer") {
-      await activePcMeta?.setRemoteDescription({ type: "answer", sdp: data.sdp });
-    } else if (data.type === "offer") {
-      // Meta initiated call → relay to Browser
-      const pcClient = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
+      if (data.type === "answer") {
+        console.log("📥 Setting remote description from Meta answer");
+        await activePcMeta?.setRemoteDescription({ type: "answer", sdp: data.sdp });
+      } else if (data.type === "offer") {
+        console.log("📞 Meta initiated call, relaying to Browser");
 
-      activePcMeta = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
+        const pcClient = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
 
-      await activePcMeta.setRemoteDescription({ type: "offer", sdp: data.sdp });
-      activePcMeta.addTransceiver("audio", { direction: "recvonly" });
+        activePcMeta = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
 
-      const metaAnswer = await activePcMeta.createAnswer();
-      await activePcMeta.setLocalDescription(metaAnswer);
-      await gatherIce(activePcMeta);
+        activePcMeta.onConnectionStateChange.subscribe((state) =>
+          console.log("Meta PC connection state:", state)
+        );
 
-      ws.send(JSON.stringify(activePcMeta.localDescription));
+        await activePcMeta.setRemoteDescription({ type: "offer", sdp: data.sdp });
+        activePcMeta.addTransceiver("audio", { direction: "recvonly" });
 
-      pcClient.addTransceiver("audio", { direction: "recvonly" });
-      const browserOffer = await pcClient.createOffer();
-      await pcClient.setLocalDescription(browserOffer);
-      await gatherIce(pcClient);
+        const metaAnswer = await activePcMeta.createAnswer();
+        await activePcMeta.setLocalDescription(metaAnswer);
+        await gatherIce(activePcMeta);
 
-      activeBrowserWs?.send(JSON.stringify(browserOffer));
+        ws.send(JSON.stringify(activePcMeta.localDescription));
+
+        pcClient.addTransceiver("audio", { direction: "recvonly" });
+        const browserOffer = await pcClient.createOffer();
+        await pcClient.setLocalDescription(browserOffer);
+        await gatherIce(pcClient);
+
+        console.log("📤 Sending offer to Browser");
+        activeBrowserWs?.send(JSON.stringify(browserOffer));
+      }
+    } catch (err) {
+      console.error("❌ Error processing Meta message:", err);
     }
   });
 
@@ -200,6 +214,8 @@ metaWss.on("connection", (ws, req) => {
     activeMetaSocket = null;
     activePcMeta = null;
   });
+
+  ws.on("error", (err) => console.error("❌ Meta WS error:", err));
 });
 
 // ========================= BROWSER WS =========================
@@ -207,11 +223,18 @@ wss.on("connection", (ws) => {
   console.log("📡 Browser connected");
   activeBrowserWs = ws;
 
-  const pcClient = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-  const pcMeta = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  const pcClient = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  });
+  const pcMeta = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  });
   activePcMeta = pcMeta;
 
-  // 🎙 Browser → Meta audio
+  pcClient.onConnectionStateChange.subscribe((state) => console.log("Client PC state:", state));
+  pcMeta.onConnectionStateChange.subscribe((state) => console.log("Meta PC state:", state));
+
+  // Browser → Meta audio
   pcClient.onTrack.subscribe((track) => {
     if (track.kind === "audio") {
       pcMeta.addTrack(track);
@@ -224,44 +247,49 @@ wss.on("connection", (ws) => {
     }
   });
 
-  // 🎧 Meta → Browser audio
+  // Meta → Browser audio
   pcMeta.onTrack.subscribe((track) => {
     if (track.kind === "audio") pcClient.addTrack(track);
   });
 
-  // Browser sends SDP offer
+  // Handle Browser SDP offer
   ws.on("message", async (message) => {
-    const { type, sdp } = JSON.parse(message);
+    try {
+      const { type, sdp } = JSON.parse(message);
 
-    if (type === "offer") {
-      // Browser → Node
-      await pcClient.setRemoteDescription({ type, sdp });
-      pcClient.addTransceiver("audio", { direction: "recvonly" });
+      if (type === "offer") {
+        console.log("📥 Received Browser SDP offer");
+        await pcClient.setRemoteDescription({ type, sdp });
+        pcClient.addTransceiver("audio", { direction: "recvonly" });
 
-      const clientAnswer = await pcClient.createAnswer();
-      await pcClient.setLocalDescription(clientAnswer);
-      await gatherIce(pcClient);
+        const clientAnswer = await pcClient.createAnswer();
+        await pcClient.setLocalDescription(clientAnswer);
+        await gatherIce(pcClient);
 
-      ws.send(JSON.stringify(pcClient.localDescription));
+        console.log("📤 Sending answer back to Browser");
+        ws.send(JSON.stringify(pcClient.localDescription));
 
-      // Node → Meta
-      pcMeta.addTransceiver("audio", { direction: "recvonly" });
-      const metaOffer = await pcMeta.createOffer();
-      await pcMeta.setLocalDescription(metaOffer);
-      await gatherIce(pcMeta);
+        // Create Meta offer
+        pcMeta.addTransceiver("audio", { direction: "recvonly" });
+        const metaOffer = await pcMeta.createOffer();
+        await pcMeta.setLocalDescription(metaOffer);
+        await gatherIce(pcMeta);
 
-      const metaPayload = {
-        AgentChatEventType: "call",
-        businessId: 363906680148599,
-        FromPhoneId: 385840701287764,
-        ToNumber: 919625534956,
-        sdpType: pcMeta.localDescription?.type,
-        sdp: pcMeta.localDescription?.sdp,
-        callEvent: "connect",
-      };
+        const metaPayload = {
+          AgentChatEventType: "call",
+          businessId: 363906680148599,
+          FromPhoneId: 385840701287764,
+          ToNumber: 919625534956,
+          sdpType: pcMeta.localDescription?.type,
+          sdp: pcMeta.localDescription?.sdp,
+          callEvent: "connect",
+        };
 
-      console.log("📤 Sending offer to Meta:", metaPayload);
-      activeMetaSocket?.send(JSON.stringify(metaPayload));
+        console.log("📤 Sending offer to Meta:", metaPayload);
+        activeMetaSocket?.send(JSON.stringify(metaPayload));
+      }
+    } catch (err) {
+      console.error("❌ Error processing Browser message:", err);
     }
   });
 
@@ -270,6 +298,8 @@ wss.on("connection", (ws) => {
     pcMeta.close();
     console.log("❌ Browser disconnected, PeerConnections closed");
   });
+
+  ws.on("error", (err) => console.error("❌ Browser WS error:", err));
 });
 
 // ========================= SERVER UPGRADE =========================
