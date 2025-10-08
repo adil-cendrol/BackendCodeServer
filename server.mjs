@@ -199,6 +199,33 @@ server.on("upgrade", (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   }
 });
+function stopRecording() {
+  if (!isRecordingStarted) return;
+  console.log("🛑 Stopping recording...");
+
+  opusBrowser.end();
+  opusMeta.end();
+  wavWriter.end();
+
+  isRecordingStarted = false;
+  browserStream = null;
+  metaStream = null;
+}
+activeBrowserWs.on("close", stopRecording);
+activeMetaWs.on("close", stopRecording);
+
+activeBrowserPC.onConnectionStateChange(() => {
+  if (activeBrowserPC.connectionState === "closed" || activeBrowserPC.connectionState === "failed") {
+    stopRecording();
+  }
+});
+
+activeMetaPC.onConnectionStateChange(() => {
+  if (activeMetaPC.connectionState === "closed" || activeMetaPC.connectionState === "failed") {
+    stopRecording();
+  }
+});
+
 
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
