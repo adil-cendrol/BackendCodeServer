@@ -5,7 +5,6 @@ import Prism from "prism-media";
 import { Writer as WavWriter } from "wav";
 import fs from "fs";
 
-// ----------------- SERVER -----------------
 const server = http.createServer();
 const wss = new WebSocketServer({ noServer: true });   // Browser
 const metaWss = new WebSocketServer({ noServer: true }); // Meta
@@ -15,7 +14,10 @@ let activeMetaWs = null;
 let activeBrowserPC = null;
 let activeMetaPC = null;
 
-// ----------------- HELPER: Finalize SDP -----------------
+let browserStream = null;
+let metaStream = null;
+
+// ----------------- Helper: Finalize SDP -----------------
 function finalizeSDP(pc, candidates) {
   let sdp = pc.localDescription.sdp;
   const srflx = candidates.find(c => c.candidate.includes("typ srflx"));
@@ -30,7 +32,6 @@ function finalizeSDP(pc, candidates) {
   return sdp;
 }
 
-// ----------------- HELPER: Create PC -----------------
 async function createPC(direction = "sendrecv") {
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
@@ -41,10 +42,58 @@ async function createPC(direction = "sendrecv") {
   pc.onicecandidate = (event) => {
     if (event.candidate) candidates.push(event.candidate);
   };
-
   return { pc, candidates };
 }
 
+// ----------------- Audio Mixing + Recording -----------------
+let opusBrowser, opusMeta, wavWriter;
+let isRecordingStarted = false;
+
+function tryStartRecording() {
+  if (isRecordingStarted || !browserStream || !metaStream) return;
+
+  console.log("🎙️ Both audio streams ready, starting recording...");
+
+  opusBrowser = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
+  opusMeta = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
+
+  wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
+  const output = fs.createWriteStream(`mixed_audio_${Date.now()}.wav`);
+  wavWriter.pipe(output);
+  const browserBuffer = [];
+  const metaBuffer = [];
+
+  function mixAndWrite() {
+    while (browserBuffer.length && metaBuffer.length) {
+      const b = browserBuffer.shift();
+      const m = metaBuffer.shift();
+      const minLen = Math.min(b.length, m.length);
+      const mixed = Buffer.alloc(minLen);
+
+      for (let i = 0; i < minLen; i += 2) {
+        const bSample = b.readInt16LE(i);
+        const mSample = m.readInt16LE(i);
+        let mixedSample = bSample + mSample;
+        mixedSample = Math.max(-32768, Math.min(32767, mixedSample));
+        mixed.writeInt16LE(mixedSample, i);
+      }
+      wavWriter.write(mixed);
+    }
+  }
+
+  opusBrowser.on("data", (pcm) => {
+    browserBuffer.push(pcm);
+    mixAndWrite();
+  });
+
+  opusMeta.on("data", (pcm) => {
+    metaBuffer.push(pcm);
+    mixAndWrite();
+  });
+
+  isRecordingStarted = true;
+  console.log("🔴 Recording started");
+}
 
 // ----------------- META WS -----------------
 metaWss.on("connection", async (ws) => {
@@ -54,14 +103,16 @@ metaWss.on("connection", async (ws) => {
   const { pc, candidates } = await createPC("sendrecv");
   activeMetaPC = pc;
 
-  // Forward audio tracks from Meta → Browser
   pc.onTrack.subscribe(track => {
     if (track.kind === "audio" && activeBrowserPC) {
       console.log("🎧 Meta audio track received, forwarding to Browser");
       activeBrowserPC.addTrack(track);
-       track.onReceiveRtp.subscribe((rtp) => {
-        console.log("📥 RTP from meta:", rtp.header.timestamp);
-        // opusStream.write(rtp.payload);
+
+      metaStream = track;
+      tryStartRecording();
+
+      track.onReceiveRtp.subscribe((rtp) => {
+        if (opusMeta) opusMeta.write(rtp.payload);
       });
     }
   });
@@ -70,7 +121,6 @@ metaWss.on("connection", async (ws) => {
     const data = JSON.parse(msg.toString());
 
     if (data.type === "offer") {
-      // Meta sends an offer → answer
       await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -79,10 +129,7 @@ metaWss.on("connection", async (ws) => {
       ws.send(JSON.stringify({ type: "answer", sdp: finalSDP }));
     }
     else if (data.sdpType === "answer") {
-      // Browser previously sent offer → set remote
-      console.log(activeMetaPC, data, "data inside that")
       if (activeMetaPC) {
-          console.log(data, "data inside22e that")
         await activeMetaPC.setRemoteDescription({ type: "answer", sdp: data.sdp });
       }
     }
@@ -92,12 +139,7 @@ metaWss.on("connection", async (ws) => {
   });
 });
 
-
-
-
-
 // ----------------- BROWSER WS -----------------
-
 wss.on("connection", async (ws) => {
   console.log("📡 Browser connected");
   activeBrowserWs = ws;
@@ -105,24 +147,19 @@ wss.on("connection", async (ws) => {
   const { pc, candidates } = await createPC("sendrecv");
   activeBrowserPC = pc;
 
-  // Forward audio tracks from Browser → Meta
-  pc.onTrack.subscribe((track) => {
+  pc.onTrack.subscribe(track => {
     if (track.kind === "audio" && activeMetaPC) {
       console.log("🎤 Browser track received, forwarding to Meta");
       activeMetaPC.addTrack(track);
 
-      // // Optional: save audio
-      // const opusStream = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
-      // const wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
-      // const output = fs.createWriteStream("browser_audio.wav");
-      // opusStream.pipe(wavWriter).pipe(output);
+      browserStream = track;
+      tryStartRecording();
 
       track.onReceiveRtp.subscribe((rtp) => {
-        // console.log("📥 RTP from Browser:", rtp.header.timestamp);
-        // opusStream.write(rtp.payload);
+        if (opusBrowser) opusBrowser.write(rtp.payload);
       });
     }
-  })
+  });
 
   ws.on("message", async (msg) => {
     const data = JSON.parse(msg.toString());
@@ -135,11 +172,11 @@ wss.on("connection", async (ws) => {
       const finalSDP = finalizeSDP(pc, candidates);
       ws.send(JSON.stringify({ type: "answer", sdp: finalSDP }));
 
-      // Relay to Meta using the existing PC
+      // Relay to Meta
       if (activeMetaWs && activeMetaPC) {
         const offer = await activeMetaPC.createOffer();
         await activeMetaPC.setLocalDescription(offer);
-        const metaSDP = finalizeSDP(activeMetaPC, []); // candidates already gathered
+        const metaSDP = finalizeSDP(activeMetaPC, []);
         activeMetaWs.send(JSON.stringify({ type: "offer", sdp: metaSDP }));
       }
     }
@@ -153,7 +190,6 @@ wss.on("connection", async (ws) => {
     }
   });
 });
-
 
 // ----------------- HTTP Upgrade -----------------
 server.on("upgrade", (req, socket, head) => {
