@@ -109,14 +109,14 @@ metaWss.on("connection", async (ws) => {
 
   pc.onTrack.subscribe(track => {
     if (track.kind === "audio" && activeBrowserPC) {
-      console.log("🎧 Meta audio track received, forwarding to Browser");
+      console.log("🎧 Meta audio track received, forwarding to Browser", activeBrowserPC);
       activeBrowserPC.addTrack(track);
 
       // metaStream = track;
       // tryStartRecording();
 
       track.onReceiveRtp.subscribe((rtp) => {
-         console.log("📥 RTP from Meta:", rtp.header.timestamp)
+        console.log("📥 RTP from Meta:", rtp.header.timestamp)
         // if (opusMeta) opusMeta.write(rtp.payload);
       });
     }
@@ -160,7 +160,7 @@ wss.on("connection", async (ws) => {
 
   pc.onTrack.subscribe(track => {
     if (track.kind === "audio" && activeMetaPC) {
-      console.log("🎤 Browser track received, forwarding to Meta");
+      console.log("🎤 Browser track received, forwarding to Meta", activeMetaPC, activeBrowserPC);
       activeMetaPC.addTrack(track);
 
       // browserStream = track;
