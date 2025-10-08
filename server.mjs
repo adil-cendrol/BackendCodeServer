@@ -49,51 +49,51 @@ async function createPC(direction = "sendrecv") {
 let opusBrowser, opusMeta, wavWriter;
 let isRecordingStarted = false;
 
-function tryStartRecording() {
-  if (isRecordingStarted || !browserStream || !metaStream) return;
+// function tryStartRecording() {
+//   if (isRecordingStarted || !browserStream || !metaStream) return;
 
-  console.log("🎙️ Both audio streams ready, starting recording...");
+//   console.log("🎙️ Both audio streams ready, starting recording...");
 
-  opusBrowser = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
-  opusMeta = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
+//   opusBrowser = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
+//   opusMeta = new Prism.opus.Decoder({ frameSize: 960, channels: 1, rate: 48000 });
 
-  wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
-  const output = fs.createWriteStream(`mixed_audio_${Date.now()}.wav`);
-  wavWriter.pipe(output);
-  const browserBuffer = [];
-  const metaBuffer = [];
+//   wavWriter = new WavWriter({ sampleRate: 48000, channels: 1, bitDepth: 16 });
+//   const output = fs.createWriteStream(`mixed_audio_${Date.now()}.wav`);
+//   wavWriter.pipe(output);
+//   const browserBuffer = [];
+//   const metaBuffer = [];
 
-  function mixAndWrite() {
-    while (browserBuffer.length && metaBuffer.length) {
-      const b = browserBuffer.shift();
-      const m = metaBuffer.shift();
-      const minLen = Math.min(b.length, m.length);
-      const mixed = Buffer.alloc(minLen);
+//   function mixAndWrite() {
+//     while (browserBuffer.length && metaBuffer.length) {
+//       const b = browserBuffer.shift();
+//       const m = metaBuffer.shift();
+//       const minLen = Math.min(b.length, m.length);
+//       const mixed = Buffer.alloc(minLen);
 
-      for (let i = 0; i < minLen; i += 2) {
-        const bSample = b.readInt16LE(i);
-        const mSample = m.readInt16LE(i);
-        let mixedSample = bSample + mSample;
-        mixedSample = Math.max(-32768, Math.min(32767, mixedSample));
-        mixed.writeInt16LE(mixedSample, i);
-      }
-      wavWriter.write(mixed);
-    }
-  }
+//       for (let i = 0; i < minLen; i += 2) {
+//         const bSample = b.readInt16LE(i);
+//         const mSample = m.readInt16LE(i);
+//         let mixedSample = bSample + mSample;
+//         mixedSample = Math.max(-32768, Math.min(32767, mixedSample));
+//         mixed.writeInt16LE(mixedSample, i);
+//       }
+//       wavWriter.write(mixed);
+//     }
+//   }
 
-  opusBrowser.on("data", (pcm) => {
-    browserBuffer.push(pcm);
-    mixAndWrite();
-  });
+//   opusBrowser.on("data", (pcm) => {
+//     browserBuffer.push(pcm);
+//     mixAndWrite();
+//   });
 
-  opusMeta.on("data", (pcm) => {
-    metaBuffer.push(pcm);
-    mixAndWrite();
-  });
+//   opusMeta.on("data", (pcm) => {
+//     metaBuffer.push(pcm);
+//     mixAndWrite();
+//   });
 
-  isRecordingStarted = true;
-  console.log("🔴 Recording started");
-}
+//   isRecordingStarted = true;
+//   console.log("🔴 Recording started");
+// }
 
 // ----------------- META WS -----------------
 metaWss.on("connection", async (ws) => {
@@ -112,11 +112,11 @@ metaWss.on("connection", async (ws) => {
       console.log("🎧 Meta audio track received, forwarding to Browser");
       activeBrowserPC.addTrack(track);
 
-      metaStream = track;
-      tryStartRecording();
+      // metaStream = track;
+      // tryStartRecording();
 
       track.onReceiveRtp.subscribe((rtp) => {
-        if (opusMeta) opusMeta.write(rtp.payload);
+        // if (opusMeta) opusMeta.write(rtp.payload);
       });
     }
   });
@@ -162,11 +162,11 @@ wss.on("connection", async (ws) => {
       console.log("🎤 Browser track received, forwarding to Meta");
       activeMetaPC.addTrack(track);
 
-      browserStream = track;
-      tryStartRecording();
+      // browserStream = track;
+      // tryStartRecording();
 
       track.onReceiveRtp.subscribe((rtp) => {
-        if (opusBrowser) opusBrowser.write(rtp.payload);
+        // if (opusBrowser) opusBrowser.write(rtp.payload);
       });
     }
   });
