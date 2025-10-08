@@ -135,7 +135,7 @@ metaWss.on("connection", async (ws) => {
     else if (data.sdpType === "answer") {
       console.log("answer sdp answer outside")
       if (activeMetaPC) {
-        console.log("inside sdp answer packet")
+        console.log("inside sdp answer packet" , data.sdp)
         await activeMetaPC.setRemoteDescription({ type: "answer", sdp: data.sdp });
       }
     }
