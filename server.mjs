@@ -5,7 +5,10 @@ import Prism from "prism-media";
 import { Writer as WavWriter } from "wav";
 import fs from "fs";
 
-const server = http.createServer();
+const server = https.createServer({
+  key: fs.readFileSync('/home/ubuntu/certs/server.key'),
+  cert: fs.readFileSync('/home/ubuntu/certs/server.crt')
+});
 const wss = new WebSocketServer({ noServer: true });   // Browser
 const metaWss = new WebSocketServer({ noServer: true }); // Meta
 
@@ -135,7 +138,7 @@ metaWss.on("connection", async (ws) => {
     else if (data.sdpType === "answer") {
       console.log("answer sdp answer outside")
       if (activeMetaPC) {
-        console.log("inside sdp answer packet" , data.sdp)
+        console.log("inside sdp answer packet", data.sdp)
         await activeMetaPC.setRemoteDescription({ type: "answer", sdp: data.sdp });
       }
     }
