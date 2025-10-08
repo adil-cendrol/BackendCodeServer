@@ -1,4 +1,6 @@
 import http from "http";
+import https from 'https';
+
 import { WebSocketServer } from "ws";
 import { RTCPeerConnection } from "werift";
 import Prism from "prism-media";
