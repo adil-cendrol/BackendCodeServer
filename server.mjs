@@ -99,6 +99,10 @@ function tryStartRecording() {
 metaWss.on("connection", async (ws) => {
   console.log("🔗 Meta connected");
   activeMetaWs = ws;
+  ws.on("close", () => {
+    console.log("Meta disconnected");
+    stopRecording();
+  });
 
   const { pc, candidates } = await createPC("sendrecv");
   activeMetaPC = pc;
@@ -143,7 +147,11 @@ metaWss.on("connection", async (ws) => {
 wss.on("connection", async (ws) => {
   console.log("📡 Browser connected");
   activeBrowserWs = ws;
-
+  // Stop recording if Browser disconnects
+  ws.on("close", () => {
+    console.log("Browser disconnected");
+    stopRecording();
+  });
   const { pc, candidates } = await createPC("sendrecv");
   activeBrowserPC = pc;
 
@@ -211,20 +219,6 @@ function stopRecording() {
   browserStream = null;
   metaStream = null;
 }
-activeBrowserWs.on("close", stopRecording);
-activeMetaWs.on("close", stopRecording);
-
-activeBrowserPC.onConnectionStateChange(() => {
-  if (activeBrowserPC.connectionState === "closed" || activeBrowserPC.connectionState === "failed") {
-    stopRecording();
-  }
-});
-
-activeMetaPC.onConnectionStateChange(() => {
-  if (activeMetaPC.connectionState === "closed" || activeMetaPC.connectionState === "failed") {
-    stopRecording();
-  }
-});
 
 
 const PORT = process.env.PORT || 8080;
