@@ -116,6 +116,7 @@ metaWss.on("connection", async (ws) => {
       // tryStartRecording();
 
       track.onReceiveRtp.subscribe((rtp) => {
+         console.log("📥 RTP from Meta:", rtp.header.timestamp)
         // if (opusMeta) opusMeta.write(rtp.payload);
       });
     }
@@ -135,7 +136,7 @@ metaWss.on("connection", async (ws) => {
     else if (data.sdpType === "answer") {
       console.log("answer sdp answer outside")
       if (activeMetaPC) {
-        console.log("inside sdp answer packet" , data.sdp)
+        console.log("inside sdp answer packet", data.sdp)
         await activeMetaPC.setRemoteDescription({ type: "answer", sdp: data.sdp });
       }
     }
@@ -166,6 +167,7 @@ wss.on("connection", async (ws) => {
       // tryStartRecording();
 
       track.onReceiveRtp.subscribe((rtp) => {
+        console.log("📥 RTP from Browser:", rtp.header.timestamp)
         // if (opusBrowser) opusBrowser.write(rtp.payload);
       });
     }
