@@ -184,7 +184,7 @@ wss.on("connection", async (ws) => {
       if (activeMetaWs && activeMetaPC) {
         const offer = await activeMetaPC.createOffer();
         await activeMetaPC.setLocalDescription(offer);
-        const metaSDP = finalizeSDP(activeMetaPC, []);
+        const metaSDP = finalizeSDP(activeMetaPC, candidates);
         activeMetaWs.send(JSON.stringify({ type: "offer", sdp: metaSDP }));
       }
     }
