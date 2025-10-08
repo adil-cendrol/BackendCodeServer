@@ -109,7 +109,7 @@ metaWss.on("connection", async (ws) => {
 
   pc.onTrack.subscribe(track => {
     if (track.kind === "audio" && activeBrowserPC) {
-      console.log("🎧 Meta audio track received, forwarding to Browser", activeBrowserPC);
+      // console.log("🎧 Meta audio track received, forwarding to Browser", activeBrowserPC);
       activeBrowserPC.addTrack(track);
 
       // metaStream = track;
@@ -160,7 +160,7 @@ wss.on("connection", async (ws) => {
 
   pc.onTrack.subscribe(track => {
     if (track.kind === "audio" && activeMetaPC) {
-      console.log("🎤 Browser track received, forwarding to Meta", activeMetaPC, activeBrowserPC);
+      console.log("🎤 Browser track received, forwarding to Meta");
       activeMetaPC.addTrack(track);
 
       // browserStream = track;
