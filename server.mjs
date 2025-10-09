@@ -116,8 +116,8 @@ metaWss.on("connection", async (ws) => {
       tryStartRecording();
 
       track.onReceiveRtp.subscribe((rtp) => {
-        // console.log("📥 RTP from Meta:", rtp.header.timestamp)
-        if (opusMeta) opusMeta.write(rtp.payload);
+        console.log("📥 RTP from Meta:", rtp.header.timestamp)
+        // if (opusMeta) opusMeta.write(rtp.payload);
       });
     }
   });
